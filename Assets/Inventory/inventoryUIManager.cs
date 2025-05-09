@@ -22,15 +22,20 @@ public class InventoryUIManager : MonoBehaviour
     }
 
     public void RefreshUI(List<ItemData> items, int selectedIndex)
+{
+    for (int i = 0; i < slots.Count; i++)
     {
-        for (int i = 0; i < slots.Count; i++)
+        if (i < items.Count)
         {
-            if (i < items.Count)
-                slots[i].SetItem(items[i].icon);
-            else
-                slots[i].SetItem(null);
-
-            slots[i].SetHighlight(i == selectedIndex);
+            // Pass the ItemData and the prefab to SetItem method
+            slots[i].SetItem(items[i], items[i].prefab != null ? Instantiate(items[i].prefab) : null);
         }
+        else
+        {
+            slots[i].SetItem(null, null); // Clear the slot if no item
+        }
+
+        slots[i].SetHighlight(i == selectedIndex);
     }
+}
 }

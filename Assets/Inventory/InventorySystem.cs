@@ -4,66 +4,90 @@ using System.Collections.Generic;
 
 public class InventorySystem : NetworkBehaviour
 {
-    public Transform itemHoldPosition;
-    public int maxSlots = 4;
+    [SerializeField] public Transform itemHoldPoint;
+    [SerializeField] public List<ItemSlot> slots;
+    [SerializeField] public int maxSlots = 4;
+    [SerializeField] public int selectedSlot = 0;
 
-    public List<ItemData> inventory = new();
-    private GameObject heldItem;
-    private int selectedSlot = 0;
+    private GameObject heldItemInstance;
 
-    [SerializeField] private InventoryUIManager uiManager;
-
-    void Start()
+    public override void OnNetworkSpawn()
     {
         if (IsOwner)
-            uiManager.Setup(this);
+            SetSelectedSlot(0);
     }
 
-    void Update()
+    public void SetSelectedSlot(int index)
+    {
+        if (index < 0 || index >= maxSlots) return;
+        selectedSlot = index;
+        UpdateUI();
+    }
+
+    public void Pickup(ItemData data)
+    {
+        if (selectedSlot < 0 || selectedSlot >= slots.Count) return;
+
+        GameObject itemPrefab = data.prefab;
+        GameObject instance = Instantiate(itemPrefab);
+        instance.GetComponent<NetworkObject>()?.Spawn();
+        slots[selectedSlot].AssignItem(data, instance);
+    }
+
+    [ServerRpc]
+    public void PickupItemServerRpc(NetworkObjectReference itemRef, string prefabName)
+    {
+        if (!itemRef.TryGet(out NetworkObject item)) return;
+
+        item.Despawn();
+        SpawnItemInHandClientRpc(prefabName);
+    }
+
+    [ClientRpc]
+    private void SpawnItemInHandClientRpc(string prefabName)
     {
         if (!IsOwner) return;
 
-        for (int i = 0; i < maxSlots; i++)
+        GameObject prefab = Resources.Load<GameObject>("Items/" + prefabName);
+        if (prefab == null)
         {
-            if (Input.GetKeyDown((KeyCode)((int)KeyCode.Alpha1 + i)))
-                SelectSlot(i);
+            Debug.LogWarning("Не найден префаб: " + prefabName);
+            return;
         }
 
-        if (Input.GetMouseButtonDown(0))
-            UseSelectedItem();
+        heldItemInstance = Instantiate(prefab, itemHoldPoint.position, itemHoldPoint.rotation, itemHoldPoint);
+        heldItemInstance.GetComponent<NetworkObject>()?.Spawn();
     }
 
-    public void Pickup(ItemData item)
+    [ServerRpc]
+    public void DropItemServerRpc()
     {
-        if (inventory.Count >= maxSlots) return;
-        inventory.Add(item);
-        uiManager.RefreshUI(inventory, selectedSlot);
-        if (inventory.Count == 1)
-            SelectSlot(0);
+        if (heldItemInstance == null) return;
+
+        NetworkObject netObj = heldItemInstance.GetComponent<NetworkObject>();
+        if (netObj != null && netObj.IsSpawned)
+        {
+            heldItemInstance.transform.SetParent(null);
+            netObj.Spawn();
+        }
+        heldItemInstance = null;
+        ClearSelectedSlotClientRpc();
     }
 
-    private void SelectSlot(int index)
+    [ClientRpc]
+    private void ClearSelectedSlotClientRpc()
     {
-        if (index >= inventory.Count) return;
-        selectedSlot = index;
-        SpawnHeldItem(inventory[index]);
-        uiManager.RefreshUI(inventory, selectedSlot);
+        if (selectedSlot >= 0 && selectedSlot < slots.Count)
+        {
+            slots[selectedSlot].ClearSlot();
+        }
     }
 
-    private void SpawnHeldItem(ItemData data)
+    private void UpdateUI()
     {
-        if (heldItem) Destroy(heldItem);
-        heldItem = Instantiate(data.prefab, itemHoldPosition);
-        heldItem.transform.localPosition = Vector3.zero;
-        heldItem.transform.localRotation = Quaternion.identity;
-    }
-
-    private void UseSelectedItem()
-    {
-        if (heldItem == null) return;
-
-        UsableItem usable = heldItem.GetComponent<UsableItem>();
-        if (usable != null)
-            usable.Use();
+        for (int i = 0; i < slots.Count; i++)
+        {
+            slots[i].SetSelected(i == selectedSlot);
+        }
     }
 }
